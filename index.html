@@ -8,7 +8,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>VIGIL // Physique V2 Recomp</title>
-<link rel="manifest" href='data:application/manifest+json,{"name":"Fight Camp 12","short_name":"FightCamp","start_url":".","display":"standalone","background_color":"%230A1830","theme_color":"%230A1830","icons":[{"src":"data:image/svg%2Bxml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 192 192%27%3E%3Crect width=%27192%27 height=%27192%27 fill=%27%230A1830%27/%3E%3Ccircle cx=%2796%27 cy=%2796%27 r=%2752%27 fill=%27%23E03131%27/%3E%3C/svg%3E","sizes":"192x192","type":"image/svg+xml"}]}'>
+<link rel="manifest" href="/fightcamp12/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/fightcamp12/icons/apple-touch-icon.png">
+<link rel="icon" href="/fightcamp12/icons/icon-192.png">
 <style>
 /* ============================================================
    VIGIL // RECOMP PROTOCOL — heads-up display
@@ -157,6 +159,19 @@ h1,h2,h3{margin:0;font-family:var(--disp);font-weight:700;text-transform:upperca
 .dur .tick{width:100%}
 .exnote{width:100%;background:rgba(4,8,14,.7);border:1px solid var(--line2);color:var(--txt);
   padding:10px;font-size:14px;margin-top:4px;resize:vertical}
+
+/* ---------- anatomy readout ---------- */
+.anat{display:flex;gap:12px;align-items:center;border:1px solid var(--line2);
+  background:radial-gradient(70% 90% at 50% 0%,rgba(63,224,255,.07),transparent);padding:10px 12px;margin:6px 0 10px}
+.anat svg{width:104px;height:132px;flex:none}
+.anat .base{fill:none;stroke:rgba(63,224,255,.30);stroke-width:1.1;stroke-linejoin:round}
+.anat .m{fill:rgba(63,224,255,.09);stroke:rgba(63,224,255,.16);stroke-width:.7}
+.anat .m.on{fill:var(--cy);stroke:var(--cy);stroke-width:.8;animation:pulseM 2.4s ease-in-out infinite}
+@keyframes pulseM{0%,100%{opacity:.72}50%{opacity:1}}
+.anat .vlbl{font-size:6.5px;letter-spacing:.16em;fill:var(--dim)}
+.anat .rd{flex:1;min-width:0}
+.anat .rd b{display:block;font-family:var(--disp);font-size:15px;letter-spacing:.08em;color:var(--cy);text-transform:uppercase}
+.anat .rd span{font-size:10.5px;color:var(--dim);letter-spacing:.08em;display:block;margin-top:3px}
 
 /* ---------- intake entries ---------- */
 .meal{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--line2)}
@@ -793,31 +808,91 @@ function rankFor(wins){
 }
 function weekWins(w){ var n=0; for(var d=1;d<=7;d++) if(log(w,d).done) n++; return n; }
 
-/* ---------- sound + haptics ---------- */
-var AC=null;
-function ac(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC&&AC.state==="suspended") AC.resume(); return AC; }
-function bell(times){
+/* ---------- audio: a small synth with a reverb tail ---------- */
+var AC=null, BUS=null, VERB=null, WET=null;
+function ac(){
+  if(!AC){
+    try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; }
+    try{
+      BUS=AC.createGain(); BUS.gain.value=0.9; BUS.connect(AC.destination);
+      /* procedural impulse response — a small bright room */
+      var sr=AC.sampleRate, len=Math.floor(sr*1.5), ir=AC.createBuffer(2,len,sr);
+      for(var ch=0;ch<2;ch++){
+        var dta=ir.getChannelData(ch);
+        for(var i=0;i<len;i++){
+          var t=i/len;
+          dta[i]=(Math.random()*2-1)*Math.pow(1-t,3.2)*(1-t*0.3);
+        }
+      }
+      VERB=AC.createConvolver(); VERB.buffer=ir;
+      WET=AC.createGain(); WET.gain.value=0.5;
+      VERB.connect(WET); WET.connect(BUS);
+    }catch(e){}
+  }
+  if(AC&&AC.state==="suspended") AC.resume();
+  return AC;
+}
+function voice(type,freq,t0,dur,peak,slide,verb){
+  var c=AC, o=c.createOscillator(), g=c.createGain();
+  o.type=type; o.frequency.setValueAtTime(freq,t0);
+  if(slide) o.frequency.exponentialRampToValueAtTime(slide,t0+dur*0.9);
+  g.gain.setValueAtTime(0.0001,t0);
+  g.gain.exponentialRampToValueAtTime(peak,t0+Math.min(0.02,dur*0.2));
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  o.connect(g); g.connect(BUS);
+  if(verb&&VERB) g.connect(VERB);
+  o.start(t0); o.stop(t0+dur+0.05);
+  return o;
+}
+function noise(t0,dur,peak,f0,f1){
+  var c=AC, sr=c.sampleRate, n=Math.max(1,Math.floor(sr*dur)), buf=c.createBuffer(1,n,sr), d=buf.getChannelData(0);
+  for(var i=0;i<n;i++) d[i]=(Math.random()*2-1);
+  var src=c.createBufferSource(); src.buffer=buf;
+  var bp=c.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=1.4;
+  bp.frequency.setValueAtTime(f0,t0); bp.frequency.exponentialRampToValueAtTime(f1||f0,t0+dur);
+  var g=c.createGain();
+  g.gain.setValueAtTime(peak,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+  src.connect(bp); bp.connect(g); g.connect(BUS); if(VERB) g.connect(VERB);
+  src.start(t0); src.stop(t0+dur+0.02);
+}
+/* named cues */
+function fx(name){
   if(!S.settings.sound) return; var c=ac(); if(!c) return;
-  times=times||1;
-  for(var t=0;t<times;t++){
-    var at=c.currentTime+t*0.16;
-    [1046.5,1568,2093].forEach(function(fq,i){
-      var o=c.createOscillator(), g=c.createGain();
-      o.type="sine"; o.frequency.setValueAtTime(fq,at);
-      g.gain.setValueAtTime(0.0001,at);
-      g.gain.exponentialRampToValueAtTime(0.13/(i+1.4),at+0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001,at+0.9-(i*0.18));
-      o.connect(g); g.connect(c.destination); o.start(at); o.stop(at+1);
+  var t=c.currentTime;
+  if(name==="blip"){                       /* a set is logged */
+    voice("sine",1760,t,0.09,0.05,2640,1);
+    voice("triangle",880,t,0.06,0.03,1320,0);
+    noise(t,0.035,0.02,3000,7000);
+  } else if(name==="confirm"){             /* session committed */
+    [[783.99,0],[1174.7,0.08],[1567.98,0.16]].forEach(function(pair){
+      voice("sine",pair[0],t+pair[1],0.9,0.09,null,1);
+      voice("sine",pair[0]*1.004,t+pair[1],0.9,0.05,null,1);
     });
+    voice("sine",130.81,t,0.5,0.06,null,0);
+    noise(t,0.3,0.02,1200,140);
+  } else if(name==="alert"){                /* rest interval elapsed */
+    for(var i=0;i<3;i++){
+      var at=t+i*0.19;
+      voice("sine",1318.5,at,0.16,0.08,null,1);
+      voice("sine",1976,at,0.16,0.045,null,1);
+    }
+  } else if(name==="boot"){                 /* systems online */
+    voice("sawtooth",180,t,1.1,0.035,1400,1);
+    voice("sine",65.4,t,1.3,0.07,null,0);
+    voice("sine",1046.5,t+0.55,0.7,0.05,null,1);
+    voice("sine",1568,t+0.72,0.8,0.04,null,1);
+    noise(t,0.9,0.014,400,4200);
+  } else if(name==="deny"){                 /* removed / reopened */
+    voice("square",420,t,0.22,0.035,190,1);
+    noise(t,0.12,0.012,900,300);
+  } else if(name==="tick"){                 /* checkbox */
+    voice("sine",2200,t,0.045,0.035,null,0);
+    noise(t,0.02,0.015,4000,9000);
   }
 }
-function thud(){
-  if(!S.settings.sound) return; var c=ac(); if(!c) return;
-  var o=c.createOscillator(), g=c.createGain(), t=c.currentTime;
-  o.type="square"; o.frequency.setValueAtTime(1760,t);
-  g.gain.setValueAtTime(0.05,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.07);
-  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t+0.08);
-}
+/* legacy call sites */
+function bell(times){ fx(times>1?"confirm":"alert"); }
+function thud(){ fx("blip"); }
 function buzz(ms){ if(S.settings.hap && navigator.vibrate) try{ navigator.vibrate(ms); }catch(e){} }
 
 /* ---------- tiny helpers ---------- */
@@ -961,7 +1036,7 @@ function renderTrain(){
        '<div class="head" data-toggle="'+i+'"><div class="idx">'+(ex.ov?"▲":pad(i+1))+'</div>'+
        '<div class="nm"><b>'+esc(ex.n)+'</b><span>'+ex.sets+' × '+esc(ex.reps)+(ex.dur?"":" · RIR "+esc(ex.rir)+" · "+esc(ex.rest))+' · '+esc(ex.tgt)+'</span></div>'+
        '<div class="cnt">'+done+'/'+ex.sets+'</div></div><div class="body">';
-    if(ex.cue) h+='<div class="last" style="color:var(--amber)">CUE: '+esc(ex.cue)+'</div>';
+    if(i===openEx) h+=anatBlock(ex);
     if(ex.ov) h+='<div class="last">▲ OVERLOAD LIFT — clear the top of the range at target RIR, then add load next exposure.</div>';
     var lastTxt=lastTime(w,d,idx);
     if(lastTxt) h+='<div class="last">ON FILE: <b>'+esc(lastTxt)+'</b></div>';
@@ -987,6 +1062,71 @@ function renderTrain(){
   fb.textContent = L.done ? "SESSION COMMITTED ✓" : "COMMIT SESSION";
   fb.className = "big"+(L.done?" ghost":" gold");
   updateMeta();
+}
+/* map the program's TARGET column onto highlighted regions */
+var MMAP={
+ "Upper chest":["chestU"],"Mid chest":["chestM"],"Chest":["chestU","chestM"],
+ "Lower / mid chest":["chestM"],"Upper back":["traps","lats"],"Lats":["lats"],
+ "Side delts":["deltS"],"Front / side delts":["deltF","deltS"],"Rear delts":["deltR"],
+ "Biceps":["biceps"],"Triceps":["triceps"],"Long-head triceps":["triceps"],"Arms":["biceps","triceps"],
+ "Quads":["quads"],"Hams / glutes":["hams","glutes"],"Hamstrings":["hams"],"Calves":["calves"],
+ "Abs":["abs"],"Legs":["quads","hams","glutes"],
+ "Recovery":["ALL"],"Mobility":["ALL"],"Conditioning":["ALL"],"Skill / recovery":["ALL"]
+};
+function bodySVG(tgt){
+  var set=MMAP[tgt]||[], all=set.indexOf("ALL")>=0;
+  function C(k){ return (all||set.indexOf(k)>=0)?' on':''; }
+  /* front figure at x0=6, posterior at x0=62 */
+  function fig(x,back){
+    var g='<g transform="translate('+x+',6)">';
+    /* wireframe silhouette — head, torso, two arms, two legs */
+    g+='<circle class="base" cx="24" cy="9" r="7.2"/>'+
+       '<path class="base" d="M21,15.8 L27,15.8 L27,19.4 L21,19.4 Z"/>'+
+       '<path class="base" d="M17.6,19 L30.4,19 L36,25 L38,44 L34.5,66 L31,90 L17,90 L13.5,66 L10,44 L12,25 Z"/>'+
+       '<path class="base" d="M11.5,25 L5,31 L2.5,57 L4,78 L8,78 L7,56 L9.5,33 Z"/>'+
+       '<path class="base" d="M36.5,25 L43,31 L45.5,57 L44,78 L40,78 L41,56 L38.5,33 Z"/>'+
+       '<path class="base" d="M13.5,90 L22,90 L21.5,122 L20,151 L14.5,151 L13,122 Z"/>'+
+       '<path class="base" d="M26,90 L34.5,90 L35,122 L33.5,151 L28,151 L26.5,122 Z"/>';
+    if(!back){
+      g+='<ellipse class="m'+C("deltF")+'" cx="10" cy="28.5" rx="5" ry="4.6"/>'+
+         '<ellipse class="m'+C("deltF")+'" cx="38" cy="28.5" rx="5" ry="4.6"/>'+
+         '<ellipse class="m'+C("deltS")+'" cx="5.6" cy="33.5" rx="2.9" ry="5.2"/>'+
+         '<ellipse class="m'+C("deltS")+'" cx="42.4" cy="33.5" rx="2.9" ry="5.2"/>'+
+         '<path class="m'+C("chestU")+'" d="M15.5,31 L23,31.5 L23,38.5 L14.8,37.5 Z"/>'+
+         '<path class="m'+C("chestU")+'" d="M32.5,31 L25,31.5 L25,38.5 L33.2,37.5 Z"/>'+
+         '<path class="m'+C("chestM")+'" d="M15,39.5 L23,40 L23,46.5 L16,44.5 Z"/>'+
+         '<path class="m'+C("chestM")+'" d="M33,39.5 L25,40 L25,46.5 L32,44.5 Z"/>'+
+         '<rect class="m'+C("abs")+'" x="18.6" y="48.5" width="10.8" height="21" rx="2.4"/>'+
+         '<ellipse class="m'+C("biceps")+'" cx="5.9" cy="43" rx="2.7" ry="7.2"/>'+
+         '<ellipse class="m'+C("biceps")+'" cx="42.1" cy="43" rx="2.7" ry="7.2"/>'+
+         '<ellipse class="m'+C("quads")+'" cx="17.6" cy="106" rx="4.4" ry="14"/>'+
+         '<ellipse class="m'+C("quads")+'" cx="30.4" cy="106" rx="4.4" ry="14"/>';
+    } else {
+      g+='<ellipse class="m'+C("deltR")+'" cx="10" cy="28.5" rx="5" ry="4.6"/>'+
+         '<ellipse class="m'+C("deltR")+'" cx="38" cy="28.5" rx="5" ry="4.6"/>'+
+         '<path class="m'+C("traps")+'" d="M18,20 L30,20 L32.5,31 L24,36 L15.5,31 Z"/>'+
+         '<path class="m'+C("lats")+'" d="M14.2,34 L23,38 L23,56 L15,50 L12.8,40 Z"/>'+
+         '<path class="m'+C("lats")+'" d="M33.8,34 L25,38 L25,56 L33,50 L35.2,40 Z"/>'+
+         '<ellipse class="m'+C("triceps")+'" cx="5.4" cy="43" rx="2.7" ry="7.6"/>'+
+         '<ellipse class="m'+C("triceps")+'" cx="42.6" cy="43" rx="2.7" ry="7.6"/>'+
+         '<path class="m'+C("glutes")+'" d="M15,72 L23.6,70.5 L23.6,87 L16.5,85 Z"/>'+
+         '<path class="m'+C("glutes")+'" d="M33,72 L24.4,70.5 L24.4,87 L31.5,85 Z"/>'+
+         '<ellipse class="m'+C("hams")+'" cx="17.6" cy="107" rx="4.2" ry="13"/>'+
+         '<ellipse class="m'+C("hams")+'" cx="30.4" cy="107" rx="4.2" ry="13"/>'+
+         '<ellipse class="m'+C("calves")+'" cx="17.2" cy="134" rx="3.6" ry="10"/>'+
+         '<ellipse class="m'+C("calves")+'" cx="30.8" cy="134" rx="3.6" ry="10"/>';
+    }
+    g+='<text class="vlbl" x="24" y="164" text-anchor="middle">'+(back?"POSTERIOR":"ANTERIOR")+'</text>';
+    return g+'</g>';
+  }
+  return '<svg viewBox="0 0 110 172">'+fig(3,false)+fig(59,true)+'</svg>';
+}
+function anatBlock(ex){
+  var known=!!MMAP[ex.tgt];
+  return '<div class="anat">'+bodySVG(ex.tgt)+
+    '<div class="rd"><b>'+esc(ex.tgt)+'</b>'+
+    '<span>'+esc(known?(ex.dur?"Whole-body work":"Primary target under load"):"Target")+'</span>'+
+    (ex.cue?'<span style="color:var(--amber)">'+esc(ex.cue)+'</span>':'')+'</div></div>';
 }
 function lastTime(w,d,i){
   for(var back=w-1; back>=1; back--){
@@ -1288,7 +1428,7 @@ function tickT(){
   if(left<=0 && !T.ringing){
     T.ringing=true; clearInterval(T.iv);
     $("dSub").textContent="interval elapsed";
-    bell(2); buzz([90,60,90]); toast("NEXT SET");
+    fx("alert"); buzz([90,60,90]); toast("NEXT SET");
     setTimeout(function(){ if(T.ringing) $("dock").className="dock"; },4000);
   } else if(left>0){ $("dSub").textContent="recovery interval"; }
 }
@@ -1314,7 +1454,7 @@ document.querySelector(".nav").addEventListener("click",function(e){
 $("basics").addEventListener("click",function(e){
   var b=e.target.closest("[data-basic]"); if(!b) return;
   ac(); var t=todaySlot(), bag=basics(t.w,t.d), k=b.getAttribute("data-basic");
-  bag[k]=!bag[k]; save(); thud(); buzz(14); renderBasics(t.w,t.d);
+  bag[k]=!bag[k]; save(); fx(bag[k]?"tick":"deny"); buzz(14); renderBasics(t.w,t.d);
 });
 $("startBtn").addEventListener("click",function(){ ac(); var t=todaySlot(); S.ui={w:t.w,d:t.d}; openEx=firstOpen(t.w,t.d); save(); go("train"); });
 function firstOpen(w,d){
@@ -1403,9 +1543,9 @@ function refreshCounts(){
 $("finishBtn").addEventListener("click",function(){
   ac();
   var w=S.ui.w,d=S.ui.d,L=log(w,d);
-  if(L.done){ L.done=false; save(); renderTrain(); toast("SESSION REOPENED",1); return; }
+  if(L.done){ L.done=false; save(); fx("deny"); renderTrain(); toast("SESSION REOPENED",1); return; }
   L.done=true; L.doneAt=Date.now(); save();
-  stopRest(); bell(2); buzz([40,40,90]);
+  stopRest(); fx("confirm"); buzz([40,40,90]);
   var wins=weekWins(w);
   if(w===12 && wins===7) showKO("COMPLETE","PROTOCOL CLOSED — 12 OF 12","every cycle accounted for");
   else if(wins===7) showKO("CYCLE "+pad(w),"SEVEN OF SEVEN · FULL COMPLIANCE","tap to dismiss");
@@ -1453,7 +1593,7 @@ $("entryList").addEventListener("click",function(e){
   if(del){
     var bag=fuelBag(S.ui.w,S.ui.d), i=+del.getAttribute("data-del"), gone=bag.x[i];
     if(gone&&gone.ph) shotDel(gone.id).catch(function(){});
-    bag.x.splice(i,1); save(); renderFuel(); toast("ENTRY REMOVED",1);
+    bag.x.splice(i,1); save(); fx("deny"); renderFuel(); toast("ENTRY REMOVED",1);
     return;
   }
   var img=e.target.closest("img[data-shot]");
@@ -1490,7 +1630,7 @@ $("sheetSave").onclick=function(){
   S.setup=true; if(!S.installed) S.installed=iso(new Date()); store(S);
   $("sheet").className="sheet";
   var t=todaySlot(); S.ui={w:t.w,d:t.d}; save();
-  go("today"); bell(1); toast("BASELINE COMMITTED");
+  go("today"); fx("confirm"); toast("BASELINE COMMITTED");
 };
 $("expBtn").onclick=function(){
   var blob=new Blob([JSON.stringify(S)],{type:"application/json"});
@@ -1543,7 +1683,13 @@ $("resetBtn").onclick=function(){
   var t=todaySlot(); S.ui={w:t.w,d:t.d};
   if(!S.setup){ openSheet(true); }
   go("today");
-  document.addEventListener("touchstart",function once(){ ac(); document.removeEventListener("touchstart",once); },{passive:true});
+  var booted=false;
+  function wake(){ if(booted) return; booted=true; ac(); fx("boot"); }
+  document.addEventListener("touchstart",function once(){ wake(); document.removeEventListener("touchstart",once); },{passive:true});
+  document.addEventListener("click",function once(){ wake(); document.removeEventListener("click",once); });
+  if("serviceWorker" in navigator && location.protocol.indexOf("http")===0){
+    try{ navigator.serviceWorker.register("/fightcamp12/sw.js",{scope:"/fightcamp12/"}); }catch(e){}
+  }
 })();
 </script>
 </body>

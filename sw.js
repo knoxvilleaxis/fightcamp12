@@ -1,15 +1,15 @@
 /* Fight Camp 12 — offline service worker.
    Cache-first: once the app has loaded a single time, it never needs the network again.
    Bump CACHE when you change index.html so phones pick up the new version. */
-const CACHE = "vigil-v3";
+const CACHE = "vigil-v5";
 const FILES = [
-  "./",
-  "./index.html",
-  "./manifest.webmanifest",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/maskable-512.png",
-  "./icons/apple-touch-icon.png"
+  "/fightcamp12/",
+  "/fightcamp12/index.html",
+  "/fightcamp12/manifest.webmanifest",
+  "/fightcamp12/icons/icon-192.png",
+  "/fightcamp12/icons/icon-512.png",
+  "/fightcamp12/icons/maskable-512.png",
+  "/fightcamp12/icons/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (e) => {
@@ -37,7 +37,7 @@ self.addEventListener("fetch", (e) => {
           caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
           return res;
         })
-        .catch(() => caches.match("./index.html"));
+        .catch(() => caches.match("/fightcamp12/index.html"));
     })
   );
 });
