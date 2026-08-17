@@ -1,7 +1,7 @@
 /* Fight Camp 12 — offline service worker.
    Cache-first: once the app has loaded a single time, it never needs the network again.
    Bump CACHE when you change index.html so phones pick up the new version. */
-const CACHE = "fightcamp-v1";
+const CACHE = "vigil-v3";
 const FILES = [
   "./",
   "./index.html",
